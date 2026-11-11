@@ -78,10 +78,12 @@ func newEnv(t *testing.T, mod func(*Options)) *env {
 		Projects:    []Project{{Name: "proj", Path: workdir}},
 		HistoryRoot: t.TempDir(),
 		Web: fstest.MapFS{
-			"index.html": {Data: []byte("<html>app</html>")},
-			"login.html": {Data: []byte("<html><!--ERROR--></html>")},
-			"style.css":  {Data: []byte("body{}")},
-			"app.js":     {Data: []byte("//")},
+			"index.html":                            {Data: []byte("<html>app</html>")},
+			"login.html":                            {Data: []byte("<html><!--ERROR--></html>")},
+			"style.css":                             {Data: []byte("body{}")},
+			"app.js":                                {Data: []byte("//")},
+			"vendor/fonts/x-latin-400-normal.woff2": {Data: []byte("wOF2")},
+			"vendor/xterm.js":                       {Data: []byte("//")},
 		},
 		Log:          slog.New(slog.NewTextHandler(logs, &slog.HandlerOptions{Level: slog.LevelDebug})),
 		MaxFrame:     1024,
@@ -553,4 +555,29 @@ func screenshotTimeoutForTest(d time.Duration) func() {
 	old := screenshotTimeout
 	screenshotTimeout = d
 	return func() { screenshotTimeout = old }
+}
+
+// The login page needs the bundled fonts before anyone is logged in; nothing
+// else under /vendor/ becomes public, and path tricks do not widen that.
+func TestFontsArePublicAndCacheableOtherVendorFilesAreNot(t *testing.T) {
+	e := newEnv(t, nil)
+	resp, err := http.Get(e.ts.URL + "/vendor/fonts/x-latin-400-normal.woff2")
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != 200 || !strings.Contains(resp.Header.Get("Cache-Control"), "max-age=") {
+		t.Fatalf("font: %d %q", resp.StatusCode, resp.Header.Get("Cache-Control"))
+	}
+	client := &http.Client{CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
+	for _, p := range []string{"/vendor/xterm.js", "/vendor/fonts/../xterm.js", "/vendor/fonts/%2e%2e/xterm.js", "/vendor/fonts/..%2fxterm.js", "/vendor/", "/app.js"} {
+		r, err := client.Get(e.ts.URL + p)
+		if err != nil {
+			t.Fatal(err)
+		}
+		r.Body.Close()
+		if r.StatusCode == 200 {
+			t.Errorf("%s is reachable without a login", p)
+		}
+	}
 }

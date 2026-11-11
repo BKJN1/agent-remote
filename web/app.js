@@ -7,15 +7,31 @@
   var TermCtor = window.Terminal.Terminal || window.Terminal;
   var FitCtor = window.FitAddon.FitAddon || window.FitAddon;
 
+  var TERM_FONT = '"JetBrains Mono", ui-monospace, "Cascadia Mono", Consolas, monospace';
   var term = new TermCtor({
     cursorBlink: true,
+    cursorStyle: 'block',
     fontSize: 14,
+    fontFamily: 'monospace', // placeholder: assigning TERM_FONT later forces a re-measure
     scrollback: 5000,
-    theme: { background: '#0a0d14', foreground: '#e8ecf4', cursor: '#6d8dff', selectionBackground: 'rgba(109,141,255,0.35)' }
+    theme: { background: '#0d0f11', foreground: '#d7dce0', cursor: '#6fd3f2', cursorAccent: '#0d0f11', selectionBackground: 'rgba(111,211,242,0.30)' }
   });
   var fit = new FitCtor();
   term.loadAddon(fit);
   term.open($('term'));
+
+  // The bundled face loads after the first paint: re-assign it so xterm measures
+  // the real glyph cell, then refit the grid.
+  if (document.fonts && document.fonts.load) {
+    document.fonts.load('14px "JetBrains Mono"').then(function () {
+      term.options.fontFamily = TERM_FONT;
+      fitNow();
+      scheduleFit();
+      // the renderer re-measures the glyph cell a frame or two after the font swap
+      setTimeout(fitNow, 150);
+      setTimeout(fitNow, 600);
+    }).catch(function () { /* the system mono face stays */ });
+  }
 
   // Scrolling must not pop up the on-screen keyboard. After a scroll button or
   // a scroll drag, ignore the focus the terminal would otherwise receive (a tap
@@ -144,6 +160,8 @@
   function setStatus(kind) { connState = kind; renderDot(); renderPulseText(); }
   function setPulse(state, since) {
     pulse = { state: state || 'idle', since: since || 0 };
+    var cur = sessionById(current);
+    if (cur) { cur.pulse = pulse.state; cur.pulse_since = pulse.since; renderTabs(); }
     renderDot();
     renderPulseText();
   }
@@ -174,6 +192,13 @@
     if (t && curTool === 'codex') t = 'Codex · ' + t; // Claude is the default, so only Codex is labelled
     p.textContent = t;
     p.className = 'pulse ' + pulse.state;
+    // The agent needs an answer: a bar with the main action sits above the keys.
+    var asking = connState === 'on' && !!current && pulse.state === 'waiting';
+    if ($('ask').hidden === asking) {
+      $('ask').hidden = !asking;
+      $('term').classList.toggle('waiting', asking);
+      scheduleFit();
+    }
   }
   setInterval(renderPulseText, 1000);
 
@@ -193,6 +218,7 @@
     api('GET', '/api/sessions', undefined, undefined, true).then(function (r) {
       if (!r.ok || !Array.isArray(r.data)) return;
       sessions = r.data;
+      renderTabs();
       var s = sessionById(current);
       if (s && s.pulse !== pulse.state) setPulse(s.pulse, s.pulse_since);
     });
@@ -207,10 +233,56 @@
 
   function loadSessions() {
     return api('GET', '/api/sessions').then(function (r) {
-      if (r.ok && Array.isArray(r.data)) sessions = r.data;
+      if (r.ok && Array.isArray(r.data)) { sessions = r.data; renderTabs(); }
       return sessions;
     });
   }
+
+  // One tab per session. The state of a session is drawn on its own tab (a
+  // sweeping line while it works, a blinking one when it needs you), so a
+  // session that is waiting is visible without switching to it.
+  function tabLabel(s, index, counts) {
+    var n = s.project || s.title || 'сессия';
+    if (n.length > 16) n = n.slice(0, 15) + '…';
+    return counts[s.project] > 1 ? n + ' ·' + (index[s.project] = (index[s.project] || 0) + 1) : n;
+  }
+
+  var SVGNS = 'http://www.w3.org/2000/svg';
+  // State is shown by shape and motion as well as colour.
+  function stateGlyph(state) {
+    if (state === 'waiting') return el('span', 'glyph waiting');
+    var svg = document.createElementNS(SVGNS, 'svg');
+    svg.setAttribute('class', 'glyph ' + (state === 'working' ? 'working' : state === 'exited' ? 'exited' : 'idle'));
+    var use = document.createElementNS(SVGNS, 'use');
+    use.setAttribute('href', state === 'working' ? '#g-work' : state === 'exited' ? '#g-end' : '#g-done');
+    svg.appendChild(use);
+    return svg;
+  }
+
+  function renderTabs() {
+    var box = $('tabs');
+    box.textContent = '';
+    var counts = {}, index = {};
+    sessions.forEach(function (s) { counts[s.project] = (counts[s.project] || 0) + 1; });
+    sessions.forEach(function (s) {
+      var name = tabLabel(s, index, counts);
+      var tool = s.tool === 'codex' ? 'Codex' : 'Claude';
+      var b = el('button', 'tab' + (s.id === current ? ' active' : ''));
+      b.setAttribute('role', 'tab');
+      b.setAttribute('data-state', s.pulse || 'idle');
+      b.setAttribute('aria-label', name + ', ' + tool + ', ' + pulseLabel(s));
+      b.appendChild(stateGlyph(s.pulse || 'idle'));
+      var lab = el('span', 'tab-label');
+      lab.appendChild(el('span', 'tab-name', name));
+      lab.appendChild(el('span', 'tab-tool', tool));
+      b.appendChild(lab);
+      // The active tab opens the session manager; the others switch to their session.
+      b.addEventListener('click', function () { if (s.id === current) showSessions(); else openSession(s.id); });
+      box.appendChild(b);
+      if (s.id === current && b.scrollIntoView) b.scrollIntoView({ inline: 'center', block: 'nearest' });
+    });
+  }
+  $('btn-new').addEventListener('click', function () { newSession(); });
 
   function sessionById(id) {
     for (var i = 0; i < sessions.length; i++) if (sessions[i].id === id) return sessions[i];
@@ -226,6 +298,7 @@
     curTool = s && s.tool ? s.tool : 'claude';
     $('sess-title').textContent = s ? s.project + ' · ' + s.title : 'Сессии';
     renderPulseText();
+    renderTabs();
   }
 
   function openSession(id) {
@@ -332,6 +405,9 @@
 
   // ---- bottom sheet ---------------------------------------------------------------
   function openSheet(title) {
+    // A live view (the laptop card) redraws itself into the sheet body every few
+    // seconds; opening another sheet must stop that, or it wipes what you are typing.
+    stopMachineRefresh();
     $('sheet-title').textContent = title;
     $('sheet-body').textContent = '';
     $('sheet').hidden = false;
@@ -340,6 +416,20 @@
   function closeSheet() { $('sheet').hidden = true; stopMachineRefresh(); }
   $('sheet-close').addEventListener('click', closeSheet);
   $('sheet').addEventListener('click', function (ev) { if (ev.target === $('sheet')) closeSheet(); });
+
+  // A row with a switch on the right; the whole row is the tap target.
+  function toggleRow(title, sub, on, onTap) {
+    var r = el('div', 'row toggle');
+    var main = el('button', 'row-main');
+    main.setAttribute('role', 'switch');
+    main.setAttribute('aria-checked', on ? 'true' : 'false');
+    main.appendChild(el('span', 'row-title', title));
+    if (sub) main.appendChild(el('span', 'row-sub', sub));
+    main.addEventListener('click', onTap);
+    r.appendChild(main);
+    r.appendChild(el('span', 'sw' + (on ? ' on' : '')));
+    return r;
+  }
 
   function row(title, sub, onTap) {
     var r = el('div', 'row');
@@ -716,6 +806,10 @@
 
   // pointerdown + preventDefault keeps focus in the terminal so the
   // on-screen keyboard does not collapse when a key button is tapped.
+  // A key fires on release, and only if the finger did not travel: swiping the
+  // rail to scroll it must not press whatever key it started on. When the
+  // browser takes the gesture over for scrolling it sends pointercancel.
+  var keyDown = null;
   $('keys').addEventListener('pointerdown', function (ev) {
     var b = ev.target.closest('button');
     if (!b) return;
@@ -724,6 +818,19 @@
     // activation, and cancelling pointerdown can suppress the click on touch.
     if (k === 'voice' || k === 'reader') return;
     ev.preventDefault();
+    keyDown = { b: b, id: ev.pointerId, x: ev.clientX, y: ev.clientY };
+  });
+  $('keys').addEventListener('pointermove', function (ev) {
+    if (keyDown && ev.pointerId === keyDown.id && Math.abs(ev.clientX - keyDown.x) + Math.abs(ev.clientY - keyDown.y) > 10) keyDown = null;
+  });
+  $('keys').addEventListener('pointercancel', function () { keyDown = null; });
+  $('keys').addEventListener('pointerup', function (ev) {
+    var d = keyDown;
+    keyDown = null;
+    if (!d || ev.pointerId !== d.id) return;
+    var b = d.b;
+    if (Math.abs(ev.clientX - d.x) + Math.abs(ev.clientY - d.y) > 10) return;
+    var k = b.getAttribute('data-seq');
     if (k === 'ctrl') { setCtrl(!ctrlOn); return; }
     // Local scrolling; keys are sent to the process only for full-screen apps.
     if (k === 'scroll-up') { quietScroll(); scrollPage(-1); return; }
@@ -1080,18 +1187,18 @@
   }
   function fmtUptime(sec) {
     var d = Math.floor(sec / 86400), h = Math.floor(sec % 86400 / 3600), m = Math.floor(sec % 3600 / 60);
-    return d > 0 ? d + ' д ' + h + ' ч' : (h > 0 ? h + ' ч ' + m + ' м' : m + ' м');
+    return d > 0 ? d + 'д ' + h + 'ч' : (h > 0 ? h + 'ч ' + m + 'м' : m + 'м');
   }
 
   // What the laptop's screen is doing, in words. A screen that is off or a
   // closed lid shows nothing at all; a locked session shows the lock screen.
   function screenInfo(m) {
     if (!m) return { key: 'on', text: '', level: '' };
-    if (m.lid === 'closed') return { key: 'lid', text: 'Крышка закрыта', level: 'low' };
-    if (m.display === 'off') return { key: 'off', text: 'Экран выключен', level: 'low' };
-    if (m.locked) return { key: 'locked', text: 'Заблокирован', level: 'low' };
-    if (m.display === 'dim') return { key: 'dim', text: 'Экран притушен', level: '' };
-    return { key: 'on', text: '', level: '' };
+    if (m.lid === 'closed') return { key: 'lid', text: 'Крышка закрыта', short: 'КРЫШКА', level: 'low' };
+    if (m.display === 'off') return { key: 'off', text: 'Экран выключен', short: 'ВЫКЛ', level: 'low' };
+    if (m.locked) return { key: 'locked', text: 'Заблокирован', short: 'ЗАБЛОК.', level: 'low' };
+    if (m.display === 'dim') return { key: 'dim', text: 'Экран притушен', short: 'ТУСКЛЫЙ', level: '' };
+    return { key: 'on', text: '', short: '', level: '' };
   }
 
   function fmtClock(iso) {
@@ -1106,7 +1213,7 @@
     var abnormal = info.key === 'lid' || info.key === 'off' || info.key === 'locked';
     var sp = $('scr-pill');
     sp.hidden = !abnormal;
-    if (abnormal) $('scr-text').textContent = info.text;
+    if (abnormal) $('scr-text').textContent = info.short;
     $('btn-screen').classList.toggle('off', abnormal);
   }
 
@@ -1119,7 +1226,7 @@
     pill.hidden = false;
     $('bat-text').textContent = b.percent + '%';
     $('bat-ico').querySelector('use').setAttribute('href', b.on_ac ? '#i-bolt' : '#i-battery');
-    var cls = 'pill';
+    var cls = 'chip';
     if (!b.on_ac && b.percent <= 10) cls += ' crit';
     else if (!b.on_ac && b.percent <= 20) cls += ' low';
     else if (b.on_ac) cls += ' ok';
@@ -1151,8 +1258,8 @@
     return c;
   }
 
-  function actionButton(icon, text, onTap) {
-    var b = el('button');
+  function actionButton(icon, text, onTap, hot) {
+    var b = el('button', hot ? 'hot' : '');
     var svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
     svg.setAttribute('class', 'ico sm');
     var use = document.createElementNS('http://www.w3.org/2000/svg', 'use');
@@ -1204,8 +1311,8 @@
       }
       if (m.thermal) {
         var t = m.thermal;
-        var tl = t.throttled || t.celsius >= 85 ? 'crit' : (t.celsius >= 75 ? 'low' : 'ok');
-        grid.appendChild(stat('Температура', Math.round(t.celsius) + ' °C', t.throttled ? 'процессор снижает частоту' : 'системная зона, норма ниже 75', tl));
+        var tl = t.throttled || t.celsius >= 85 ? 'crit' : (t.celsius >= 75 ? 'low' : '');
+        grid.appendChild(stat('Температура', Math.round(t.celsius) + ' °C', t.throttled ? 'процессор снижает частоту' : 'зона ACPI, норма до 75', tl));
       }
       grid.appendChild(stat('Процессор', m.cpu_percent + '%', '', m.cpu_percent >= 90 ? 'low' : '', m.cpu_percent));
       var mem = m.memory;
@@ -1224,7 +1331,7 @@
       grid.appendChild(stat('Экран', scrValue, scrSub, sc.level));
       body.appendChild(grid);
 
-      body.appendChild(row('Не давать ноутбуку засыпать', m.keep_awake ? 'включено: пока работает сервер' : 'выключено', function () {
+      body.appendChild(toggleRow('Не давать ноутбуку засыпать', m.keep_awake ? 'включено: пока работает сервер' : 'выключено', !!m.keep_awake, function () {
         api('POST', '/api/machine/keepawake', { on: !m.keep_awake }).then(function (r) {
           if (!r.ok) { banner(errText(r.data && r.data.error), 'err'); return; }
           refreshMachine().then(render);
@@ -1233,7 +1340,7 @@
 
       body.appendChild(el('p', 'section', 'Управление'));
       var acts = el('div', 'actions');
-      acts.appendChild(actionButton('i-lock', 'Заблокировать экран', function () {
+      acts.appendChild(actionButton('i-lock', 'Заблокировать экран ноутбука', function () {
         if (!confirm('Заблокировать экран ноутбука? Скриншоты будут показывать экран входа.')) return;
         api('POST', '/api/machine/lock').then(function (r) {
           banner(r.ok ? 'Экран заблокирован.' : errText(r.data && r.data.error), r.ok ? '' : 'err');
@@ -1242,9 +1349,9 @@
       }));
       if (m.power_enabled) {
         acts.appendChild(actionButton('i-moon', 'Сон', function () { powerFlow('sleep'); }));
-        acts.appendChild(actionButton('i-moon', 'Гибернация', function () { powerFlow('hibernate'); }));
-        acts.appendChild(actionButton('i-refresh', 'Перезагрузить', function () { powerFlow('restart'); }));
-        acts.appendChild(actionButton('i-power', 'Выключить', function () { powerFlow('shutdown'); }));
+        acts.appendChild(actionButton('i-moon', 'Гибернация', function () { powerFlow('hibernate'); }, true));
+        acts.appendChild(actionButton('i-refresh', 'Перезагрузить', function () { powerFlow('restart'); }, true));
+        acts.appendChild(actionButton('i-power', 'Выключить', function () { powerFlow('shutdown'); }, true));
       }
       body.appendChild(acts);
       if (m.power_enabled) {
@@ -1388,6 +1495,7 @@
 
   function composeText() { return $('compose-text').value.replace(/\s*\n\s*/g, ' ').trim(); }
 
+  $('ask-btn').addEventListener('click', function () { openCompose(true); });
   $('voice-toggle').addEventListener('click', function () { if (listening) stopVoice(); else startVoice(); });
   // Key-bar buttons that need a real click (see the pointerdown handler).
   $('keys').addEventListener('click', function (ev) {

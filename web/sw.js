@@ -14,7 +14,7 @@ self.addEventListener('push', function (ev) {
       for (var i = 0; i < cs.length; i++) {
         if (cs[i].visibilityState === 'visible') return;
       }
-      return self.registration.showNotification(data.title || 'claude-remote', {
+      return self.registration.showNotification(data.title || 'agent-remote', {
         body: data.body || '',
         tag: data.tag || undefined,
         renotify: true,

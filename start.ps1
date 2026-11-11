@@ -8,4 +8,5 @@ $name = 'rbk.tail4c6375.ts.net'
   --project "test1=$PSScriptRoot\test1" `
   --tls-cert "$name.crt" `
   --tls-key "$name.key" `
-  --allow-host $name
+  --allow-host $name `
+  @args

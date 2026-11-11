@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-visual">
-<meta name="theme-color" content="#100f0d">
+<meta name="theme-color" content="#121518">
 <meta name="color-scheme" content="dark">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-capable" content="yes">
@@ -16,7 +16,7 @@
 </head>
 <body>
 
-<!-- Icon sprite: square-cap strokes drawn in currentColor -->
+<!-- Icon sprite: round-cap strokes drawn in currentColor -->
 <svg width="0" height="0" style="position:absolute" aria-hidden="true" focusable="false">
   <defs>
     <symbol id="i-logo" viewBox="0 0 24 24"><path d="m4 7 5 5-5 5M12 18h8"/></symbol>
@@ -44,6 +44,10 @@
     <symbol id="i-moon" viewBox="0 0 24 24"><path d="M20 14.5A8 8 0 0 1 9.5 4 8 8 0 1 0 20 14.5z"/></symbol>
     <symbol id="i-lock" viewBox="0 0 24 24"><path d="M5 11h14v9H5zM8 11V8a4 4 0 0 1 8 0v3"/></symbol>
     <symbol id="i-copy" viewBox="0 0 24 24"><path d="M9 9h11v11H9zM5 15V4h11"/></symbol>
+    <symbol id="i-camera" viewBox="0 0 24 24"><path d="M4 8h3l2-3h6l2 3h3v11H4z"/><circle cx="12" cy="13.5" r="3.5"/></symbol>
+    <symbol id="g-work" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9" stroke-opacity=".25"/><path d="M21 12a9 9 0 0 0-9-9"/></symbol>
+    <symbol id="g-done" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M7.5 12.5l3 3 6-6.5"/></symbol>
+    <symbol id="g-end" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M8 12h8"/></symbol>
   </defs>
 </svg>
 
@@ -63,13 +67,19 @@
       <span class="spacer"></span>
       <button id="scr-pill" type="button" class="chip low" hidden aria-label="Состояние экрана"><span class="k">ЭКРАН</span><span id="scr-text"></span></button>
       <button id="btn-machine" type="button" class="chip" hidden aria-label="Состояние ноутбука"><svg class="ico sm" id="bat-ico"><use href="#i-battery"/></svg><span id="bat-text"></span></button>
-      <button id="btn-screen" type="button" class="rail-btn sm" aria-label="Экран ноутбука"><svg class="ico"><use href="#i-monitor"/></svg></button>
+      <button id="btn-screen" type="button" class="rail-btn sm" aria-label="Экран ноутбука"><svg class="ico"><use href="#i-camera"/></svg></button>
     </div>
   </header>
 
   <div id="banner" hidden></div>
 
   <main id="term"></main>
+
+  <!-- Shown while the agent needs an answer -->
+  <div id="ask" hidden>
+    <div class="ask-txt"><strong>Агент ждёт вас</strong><span>Нужен ответ или разрешение</span></div>
+    <button id="ask-btn" type="button"><svg class="ico"><use href="#i-mic"/></svg>Ответить</button>
+  </div>
 
   <div id="compose" hidden>
     <textarea id="compose-text" rows="2" placeholder="Продиктуйте или напишите. Текст можно поправить перед отправкой." autocapitalize="sentences"></textarea>
@@ -85,6 +95,7 @@
   </div>
 
   <nav id="keys" aria-label="Клавиши">
+    <div id="keys-scroll">
     <div class="kgroup tools">
       <button type="button" class="accent" data-seq="voice" aria-label="Голосовой ввод"><svg class="ico"><use href="#i-mic"/></svg></button>
       <button type="button" class="accent" data-seq="reader" aria-label="Текст вывода"><svg class="ico"><use href="#i-doc"/></svg></button>
@@ -108,11 +119,12 @@
       <button type="button" data-seq="right" aria-label="Вправо"><svg class="ico"><use href="#i-right"/></svg></button>
     </div>
     <div class="kgroup">
-      <button type="button" class="enter" data-seq="enter" aria-label="Enter"><svg class="ico"><use href="#i-enter"/></svg></button>
       <button type="button" data-seq="|">|</button>
       <button type="button" data-seq="/">/</button>
       <button type="button" data-seq="~">~</button>
     </div>
+    </div>
+    <button type="button" class="enter" data-seq="enter" aria-label="Enter"><svg class="ico"><use href="#i-enter"/></svg></button>
   </nav>
 </div>
 

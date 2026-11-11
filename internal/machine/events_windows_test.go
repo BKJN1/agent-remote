@@ -20,11 +20,15 @@ func TestDisplayStateFollowsPowerSettingMessages(t *testing.T) {
 	if s.snapshot().Display != "unknown" {
 		t.Fatal("must start unknown")
 	}
-	for data, want := range map[uint32]string{1: "on", 0: "off", 2: "dim"} {
-		ps := powerBroadcastSetting{guid: guidConsoleDisplayState, length: 4, data: data}
+	// Ordered: the checks below rely on "dim" being the last state set.
+	for _, c := range []struct {
+		data uint32
+		want string
+	}{{1, "on"}, {0, "off"}, {2, "dim"}} {
+		ps := powerBroadcastSetting{guid: guidConsoleDisplayState, length: 4, data: c.data}
 		send(s, ps)
-		if got := s.snapshot().Display; got != want {
-			t.Fatalf("data %d: %q, want %q", data, got, want)
+		if got := s.snapshot().Display; got != c.want {
+			t.Fatalf("data %d: %q, want %q", c.data, got, c.want)
 		}
 	}
 	// An unknown value changes nothing.

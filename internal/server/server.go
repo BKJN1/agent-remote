@@ -10,6 +10,7 @@ import (
 	"net"
 	"net/http"
 	"net/netip"
+	"path"
 	"strconv"
 	"strings"
 	"sync"
@@ -156,6 +157,11 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/push/unsubscribe", s.api(s.handlePushUnsubscribe))
 	static := http.FileServerFS(s.o.Web)
 	mux.Handle("/", s.requireAuth(func(w http.ResponseWriter, r *http.Request) {
+		// Bundled third-party files never change between builds; fonts are
+		// large, so let the phone keep them.
+		if strings.HasPrefix(r.URL.Path, "/vendor/") {
+			w.Header().Set("Cache-Control", "private, max-age=86400")
+		}
 		static.ServeHTTP(w, r)
 	}))
 	return s.secure(mux)
@@ -273,7 +279,7 @@ func formOriginOK(r *http.Request) bool {
 // requireAuth gates a handler on a valid token (cookie or Bearer header).
 func (s *Server) requireAuth(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		if publicAssets[r.URL.Path] {
+		if publicAssets[r.URL.Path] || isPublicFont(r.URL.Path) {
 			next(w, r)
 			return
 		}
@@ -318,4 +324,11 @@ func itoa(n int) string {
 		n /= 10
 	}
 	return string(b[i:])
+}
+
+// isPublicFont allows the bundled fonts without a login (the login page uses
+// them). The path must already be clean: the static handler cleans paths, so a
+// prefix check alone would let /vendor/fonts/%2e%2e/app.js reach any file.
+func isPublicFont(p string) bool {
+	return strings.HasPrefix(p, "/vendor/fonts/") && path.Clean(p) == p && !strings.Contains(p, "..")
 }
